@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>hyperbay</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='4' fill='%230b0f14'/%3E%3Cpath d='M6 17c3-1.5 9-1.5 12 0M6 13.5c3-1.5 9-1.5 12 0M12 5v4.5' stroke='%2339d3bb' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='12' cy='5' r='1.6' fill='%2339d3bb'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./assets/app.css">
+</head>
+<body>
+<header id="topbar">
+  <a class="brand" href="#/">
+    <svg class="brand-mark" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+      <path d="M6 17c3-1.5 9-1.5 12 0M6 13.5c3-1.5 9-1.5 12 0M12 5v4.5" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+      <circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/>
+    </svg>
+    <span class="brand-word">hyper<b>bay</b></span>
+  </a>
+  <nav id="nav" aria-label="Screens">
+    <a href="#/" data-nav="bay">Bay</a>
+    <a href="#/seeding" data-nav="seeding">Seedbox</a>
+    <a href="#/publish" data-nav="publish">Publish</a>
+    <a href="#/network" data-nav="network">Network</a>
+  </nav>
+  <div class="topbar-right">
+    <span id="rates" class="rates mono" title="Live throughput of this node">
+      <span id="rate-down" class="rate-down">↓ 0 B/s</span>
+      <span id="rate-up" class="rate-up">↑ 0 B/s</span>
+    </span>
+    <span id="peer-pill" class="pill pill-amber mono" title="Connected peers">…</span>
+  </div>
+</header>
+<main id="view" aria-live="polite">
+  <div class="boot">
+    <div class="boot-mark"></div>
+    <p class="boot-line">Loading hyperbay…</p>
+  </div>
+</main>
+<div id="toasts" role="status" aria-live="polite"></div>
+<div id="overlay-root"></div>
+<script>
+  // A failure while loading or evaluating the app module leaves the window on
+  // the static boot state forever. Surface the reason instead of a blank pane.
+  (function () {
+    const report = reason => {
+      const view = document.getElementById('view')
+      if (!view || view.dataset.booted || view.dataset.failed) return
+      view.dataset.failed = '1'
+      view.textContent = 'hyperbay failed to start\n\n' + reason
+      view.style.cssText = 'padding:24px;font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:#f2555a;white-space:pre-wrap'
+    }
+
+    addEventListener('error', event => {
+      const where = event.filename ? '\n' + event.filename + ':' + event.lineno + ':' + event.colno : ''
+      report((event.message || 'script error') + where)
+    })
+
+    addEventListener('unhandledrejection', event => {
+      const reason = event.reason
+      report('unhandled rejection: ' + (reason && reason.message ? reason.message : String(reason)))
+    })
+
+    // If the module never runs at all — a MIME rejection, a resolution error,
+    // a syntax error in a dependency — nothing above fires with a useful
+    // message. Wait until the document has finished loading before judging it,
+    // so a slow or restarting gateway is not reported as a broken build.
+    const watch = () => setTimeout(() => {
+      report('the app module loaded but never started.\n\nIf the gateway was restarting, reload. Otherwise check the console for a module error.')
+    }, 15000)
+    if (document.readyState === 'complete') watch()
+    else addEventListener('load', watch, { once: true })
+  })()
+</script>
+<script type="module" src="./assets/app.mjs" onerror="this.dispatchEvent(new ErrorEvent('error', { message: 'failed to load ./assets/app.mjs' }))"></script>
+<noscript><p style="padding:24px;font-family:system-ui">hyperbay needs JavaScript.</p></noscript>
+</body>
+</html>
