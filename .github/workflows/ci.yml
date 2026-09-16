@@ -85,7 +85,9 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.suffix }}
           provenance: false
           load: ${{ github.event_name == 'pull_request' }}
-          tags: hyperbay:ci-${{ matrix.suffix }}
+          # push-by-digest refuses a tagged ref, so the local tag exists only on
+          # the pull-request path where the image is loaded instead of pushed.
+          tags: ${{ github.event_name == 'pull_request' && format('hyperbay:ci-{0}', matrix.suffix) || '' }}
           outputs: ${{ github.event_name != 'pull_request' && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE) || '' }}
 
       # An image that boots is the only claim worth making. amd64 runs natively;
