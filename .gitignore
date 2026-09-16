@@ -1,5 +1,4 @@
 node_modules/
-package-lock.json
 _probe*.js
 _check*.js
 _ui-serve.js
