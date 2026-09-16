@@ -52,17 +52,22 @@ container from the Docker tab.
 
 ## Deploy — no registry
 
-If you would rather not publish the image, ship it over SSH:
+This is what was actually used for the first deployment. No registry needed:
 
 ```sh
-docker buildx build --platform linux/amd64 -t hyperbay:local --load .
-docker save hyperbay:local | gzip | ssh unraid 'gunzip | docker load'
+docker buildx build --platform linux/amd64 -t hyperbay:0.1.0 --load .
+docker save hyperbay:0.1.0 | gzip -1 | ssh unraid 'gunzip | docker load'
+
+# The image runs as uid 10001; Unraid keeps appdata as nobody:users. Run as
+# 99:100 and make the directory writable by it, or the node cannot write
+# /data/identity.json and exits immediately.
+ssh unraid 'mkdir -p /mnt/user/appdata/hyperbay && chown -R 99:100 /mnt/user/appdata/hyperbay'
 
 ssh unraid 'docker run -d --name hyperbay --restart unless-stopped \
-  --network host \
+  --network host --user 99:100 \
   -e HYPERBAY_HOST=0.0.0.0 -e HYPERBAY_PORT=8433 -e HYPERBAY_STORAGE=/data \
   -v /mnt/user/appdata/hyperbay:/data \
-  hyperbay:local'
+  hyperbay:0.1.0'
 ```
 
 ## Networking
@@ -73,6 +78,28 @@ needs port forwarding — the swarm dials out.
 
 Only the gateway port (8433) is inbound, and only if you want the UI or the
 bridge from another machine.
+
+### Peers across VLANs
+
+Outbound UDP is all the swarm needs to reach the wider network, and the
+deployed node bootstraps the DHT fine (it learns its public address and fills a
+routing table).
+
+Two peers on *different local VLANs* are a separate matter. On this network the
+tower sits on `10.0.40.0/24` and a laptop on `10.0.10.0/24`; TCP between them
+is routed (ssh works) but a Hyperswarm connection never forms in either
+direction, and a bare two-peer probe on a shared topic also gets zero
+connections. Both peers report `firewalled: true`, so they need UDP
+holepunching, and inter-VLAN UDP is filtered here — with both behind one public
+address, the router would also have to hairpin.
+
+Two peers on the same side of that boundary connect immediately: a second
+container on the tower joined the deployed bay, replicated the index and pulled
+a 5 MB artifact byte-identical in under a second.
+
+So: peers on the same segment and peers out on the internet are fine. If you
+want your laptop to talk to the tower directly, that is a firewall rule between
+those VLANs (allow UDP), not an application change.
 
 ## Configuration
 

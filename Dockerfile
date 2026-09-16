@@ -43,11 +43,24 @@ COPY lib ./lib
 COPY ui ./ui
 COPY worker.js ./worker.js
 
+# bare-runtime/bin/bare is a Node shim that chmod()s the real binary on every
+# start. That fails for any user that does not own /app — which is exactly what
+# happens on Unraid, where containers conventionally run as 99:100. Mark the
+# real binary executable once, at build time, and link it so the entrypoint
+# never needs to write anything.
+RUN set -eux; \
+    bare_bin="$(ls -d /app/node_modules/bare-runtime-*/bin/bare | head -1)"; \
+    chmod 0755 "$bare_bin"; \
+    ln -sf "$bare_bin" /usr/local/bin/bare; \
+    bare -e 'console.log("bare " + Bare.version + " " + Bare.platform + "-" + Bare.arch)'
+
 # Storage is a volume: the corestore, the identity keypair and config.json all
 # live here, so losing it means losing this peer's identity and its bay.
+# World-readable app tree so the image also runs under --user <uid>:<gid>.
 RUN mkdir -p /data && \
     useradd --system --uid 10001 --home-dir /data hyperbay && \
-    chown -R hyperbay:hyperbay /data /app
+    chown -R hyperbay:hyperbay /data && \
+    chmod -R a+rX /app
 USER hyperbay
 
 VOLUME ["/data"]
@@ -58,7 +71,5 @@ EXPOSE 8433/tcp
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.HYPERBAY_PORT||8433)+'/api/state').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
 
-# The package's own bin path, not node_modules/.bin: npm does not create the
-# shim when the runtime is installed with --no-save.
-ENTRYPOINT ["./node_modules/bare-runtime/bin/bare", "bin/hyperbay.js"]
+ENTRYPOINT ["bare", "bin/hyperbay.js"]
 CMD ["serve"]

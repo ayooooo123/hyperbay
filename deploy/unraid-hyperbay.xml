@@ -41,7 +41,13 @@
   </Overview>
   <Category>Productivity: Tools: Network:Other</Category>
   <WebUI>http://[IP]:[PORT:8433]/</WebUI>
-  <ExtraParams/>
+  <!--
+    The image runs as uid 10001. Unraid keeps appdata as nobody:users, so run
+    as 99:100 and make the directory writable by it before first start:
+      mkdir -p /mnt/user/appdata/hyperbay && chown -R 99:100 /mnt/user/appdata/hyperbay
+    Without this the node cannot write /data/identity.json and exits.
+  -->
+  <ExtraParams>--user 99:100</ExtraParams>
   <PostArgs/>
   <CPUset/>
   <DateInstalled/>

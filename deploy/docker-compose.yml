@@ -11,6 +11,11 @@ services:
     container_name: hyperbay
     restart: unless-stopped
     network_mode: host
+    # Unraid keeps appdata as nobody:users. The image's own user is 10001, so
+    # without this the node cannot write /data/identity.json. Whatever uid you
+    # pick, the host directory has to be writable by it:
+    #   chown -R 99:100 /mnt/user/appdata/hyperbay
+    user: "99:100"
     environment:
       # The gateway. 0.0.0.0 so it is reachable from the LAN; put it behind a
       # reverse proxy or keep it on a trusted network — it has no auth and it
