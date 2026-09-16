@@ -1,0 +1,14 @@
+node_modules
+.git
+.github
+test
+docs
+_check*.js
+_probe*.js
+_ui-serve.js
+*.log
+.DS_Store
+storage
+deploy
+Dockerfile
+.dockerignore

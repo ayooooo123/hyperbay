@@ -83,6 +83,27 @@ HF_ENDPOINT=http://127.0.0.1:8433 huggingface-cli download qwen/qwen3-8b
 The bridge streams straight out of the Hyperdrive. It supports `Range`, so a
 broken transfer resumes instead of restarting.
 
+## Run it as a seedbox
+
+```sh
+docker buildx build --platform linux/amd64 -t hyperbay:local .
+
+docker run -d --name hyperbay --restart unless-stopped --network host \
+  -e HYPERBAY_HOST=0.0.0.0 \
+  -v /mnt/user/appdata/hyperbay:/data \
+  hyperbay:local
+```
+
+Configuration is by flag or environment (`HYPERBAY_STORAGE`, `HYPERBAY_PORT`,
+`HYPERBAY_HOST`, `HYPERBAY_CATALOG`); flags win. Host networking is the default
+because Hyperswarm holepunches over UDP and nothing needs forwarding.
+
+`deploy/` has a compose file, an Unraid template and the full notes —
+`deploy/README.md`.
+
+The gateway has no authentication and can publish, seed and delete on the
+node's behalf. Keep it on a trusted network.
+
 ## Trust
 
 - Every catalog op is signed with the publisher's ed25519 key. `apply` verifies

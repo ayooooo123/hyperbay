@@ -1,0 +1,40 @@
+# Hyperbay seedbox / gateway.
+#
+# Host networking is deliberate. Hyperswarm holepunches over UDP, and a peer
+# behind Docker's bridge NAT works but connects to fewer peers and re-punches
+# more often. On a box you own, host networking gives the DHT a straight path.
+# Swap to the commented bridge block if you must isolate it.
+
+services:
+  hyperbay:
+    image: ghcr.io/ayooooo123/hyperbay:latest
+    container_name: hyperbay
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      # The gateway. 0.0.0.0 so it is reachable from the LAN; put it behind a
+      # reverse proxy or keep it on a trusted network — it has no auth and it
+      # can publish, seed and delete on this node's behalf.
+      HYPERBAY_HOST: 0.0.0.0
+      HYPERBAY_PORT: "8433"
+      HYPERBAY_STORAGE: /data
+      # Join an existing bay on first boot. Leave unset to start your own; the
+      # key is then printed at startup and shown on the Network screen.
+      # HYPERBAY_CATALOG: <catalog key>
+    volumes:
+      # Corestore, the ed25519 identity and config.json all live here. Losing
+      # this volume means losing this peer's identity and everything it seeds.
+      - /mnt/user/appdata/hyperbay:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8433/api/state').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+
+# Bridge alternative: reachable on 8433, but the swarm has to punch out through
+# NAT. Note that Hyperswarm needs outbound UDP, which bridge allows.
+#
+#    network_mode: bridge
+#    ports:
+#      - "8433:8433/tcp"

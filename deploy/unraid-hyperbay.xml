@@ -1,0 +1,95 @@
+<?xml version="1.0"?>
+<!--
+  Unraid Docker template for Hyperbay.
+
+  Install: copy to the Unraid box at
+    /boot/config/plugins/dockerMan/templates-user/my-hyperbay.xml
+  then Docker tab -> Add Container -> select "hyperbay" from the template list.
+
+  Host networking is deliberate: Hyperswarm holepunches over UDP and a peer on
+  the bridge reaches fewer peers. Nothing needs forwarding — the swarm dials out.
+-->
+<Container version="2">
+  <Name>hyperbay</Name>
+  <Repository>ghcr.io/ayooooo123/hyperbay:latest</Repository>
+  <Registry>https://github.com/ayooooo123/hyperbay/pkgs/container/hyperbay</Registry>
+  <Network>host</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/ayooooo123/hyperbay/issues</Support>
+  <Project>https://github.com/ayooooo123/hyperbay</Project>
+  <Overview>
+    A decentralized bay for open-source model weights. The catalog is a
+    multi-writer Autobase, the weights are one Hyperdrive per model, and
+    discovery runs over the Hyperswarm DHT — so this container is a full peer,
+    not a client of a server.
+
+    Run it as a seedbox: it mirrors what you publish or fetch and serves those
+    bytes to anyone else on the bay. The built-in HTTP bridge lets ordinary
+    tools read from the swarm, with Range support so broken transfers resume:
+
+      curl -O http://TOWER_IP:8433/f/&lt;owner&gt;/&lt;name&gt;/&lt;file&gt;
+      HF_ENDPOINT=http://TOWER_IP:8433 huggingface-cli download &lt;owner&gt;/&lt;name&gt;
+
+    The web UI is on the same port. It has no authentication and it can publish,
+    seed and delete on this node's behalf, so keep it on a trusted network or
+    put it behind a reverse proxy with auth.
+
+    The appdata volume holds the corestore, this peer's ed25519 identity and its
+    config. Losing it means losing the identity and everything it seeds.
+  </Overview>
+  <Category>Productivity: Tools: Network:Other</Category>
+  <WebUI>http://[IP]:[PORT:8433]/</WebUI>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+
+  <Config
+    Name="Storage"
+    Target="/data"
+    Default="/mnt/user/appdata/hyperbay"
+    Mode="rw"
+    Description="Corestore, identity keypair and config. Back this up: it is this peer's identity."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false">/mnt/user/appdata/hyperbay</Config>
+
+  <Config
+    Name="Gateway port"
+    Target="HYPERBAY_PORT"
+    Default="8433"
+    Mode=""
+    Description="Port for the HTTP bridge and the web UI."
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false">8433</Config>
+
+  <Config
+    Name="Bind address"
+    Target="HYPERBAY_HOST"
+    Default="0.0.0.0"
+    Mode=""
+    Description="0.0.0.0 to reach it from the LAN, 127.0.0.1 to keep it local to the server."
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false">0.0.0.0</Config>
+
+  <Config
+    Name="Catalog key"
+    Target="HYPERBAY_CATALOG"
+    Default=""
+    Mode=""
+    Description="Join an existing bay by its catalog key. Leave empty to start a new bay; the key is then printed in the container log and shown on the Network screen."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false"/>
+</Container>

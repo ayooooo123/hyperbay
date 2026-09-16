@@ -2,7 +2,24 @@
 // Hyperbay CLI. Bare only — run with `bare bin/hyperbay.js <cmd>`.
 
 const path = require('bare-path')
+const process = require('bare-process')
 const goodbye = require('graceful-goodbye')
+
+// Flags win; environment is the fallback so a container needs no arguments.
+const env = process.env
+const ENV_DEFAULTS = {
+  storage: env.HYPERBAY_STORAGE,
+  catalog: env.HYPERBAY_CATALOG,
+  port: env.HYPERBAY_PORT,
+  host: env.HYPERBAY_HOST
+}
+
+function opt (flags, name) {
+  const value = flags[name]
+  if (value !== undefined && value !== true) return value
+  if (value === true) return true
+  return ENV_DEFAULTS[name] || undefined
+}
 
 const HyperbayNode = require('../lib/node.js')
 const { createGateway } = require('../lib/gateway.js')
@@ -129,8 +146,8 @@ function metaFromFlags (flags, dir) {
 
 async function withNode (flags, fn) {
   const node = new HyperbayNode({
-    storage: flags.storage && flags.storage !== true ? flags.storage : undefined,
-    catalogKey: flags.catalog && flags.catalog !== true ? flags.catalog : undefined,
+    storage: opt(flags, 'storage'),
+    catalogKey: opt(flags, 'catalog'),
     swarm: flags.swarm !== false
   })
   await node.ready()
@@ -166,15 +183,15 @@ function progressLine (label) {
 const commands = {
   async serve (flags) {
     const node = new HyperbayNode({
-      storage: flags.storage && flags.storage !== true ? flags.storage : undefined,
-      catalogKey: flags.catalog && flags.catalog !== true ? flags.catalog : undefined,
+      storage: opt(flags, 'storage'),
+      catalogKey: opt(flags, 'catalog'),
       swarm: flags.swarm !== false,
       seed: true
     })
     await node.ready()
 
-    const port = flags.port && flags.port !== true ? Number(flags.port) : (node.config.gateway.port || DEFAULT_PORT)
-    const host = flags.host && flags.host !== true ? flags.host : node.config.gateway.host
+    const port = opt(flags, 'port') ? Number(opt(flags, 'port')) : (node.config.gateway.port || DEFAULT_PORT)
+    const host = opt(flags, 'host') || node.config.gateway.host
     const gateway = await createGateway(node, { port, host })
 
     const state = await node.state()
@@ -254,8 +271,8 @@ const commands = {
   async seed (flags, slugs) {
     if (!slugs.length) throw new Error('usage: hyperbay seed <slug>...')
     const node = new HyperbayNode({
-      storage: flags.storage && flags.storage !== true ? flags.storage : undefined,
-      catalogKey: flags.catalog && flags.catalog !== true ? flags.catalog : undefined,
+      storage: opt(flags, 'storage'),
+      catalogKey: opt(flags, 'catalog'),
       seed: true
     })
     await node.ready()
