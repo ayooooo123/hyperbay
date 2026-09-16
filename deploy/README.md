@@ -61,12 +61,12 @@ docker save hyperbay:0.1.0 | gzip -1 | ssh unraid 'gunzip | docker load'
 # The image runs as uid 10001; Unraid keeps appdata as nobody:users. Run as
 # 99:100 and make the directory writable by it, or the node cannot write
 # /data/identity.json and exits immediately.
-ssh unraid 'mkdir -p /mnt/user/appdata/hyperbay && chown -R 99:100 /mnt/user/appdata/hyperbay'
+ssh unraid 'mkdir -p /mnt/user/hyperbay && chown -R 99:100 /mnt/user/hyperbay'
 
 ssh unraid 'docker run -d --name hyperbay --restart unless-stopped \
   --network host --user 99:100 \
   -e HYPERBAY_HOST=0.0.0.0 -e HYPERBAY_PORT=8433 -e HYPERBAY_STORAGE=/data \
-  -v /mnt/user/appdata/hyperbay:/data \
+  -v /mnt/user/hyperbay:/data \
   hyperbay:0.1.0'
 ```
 
@@ -101,6 +101,61 @@ So: peers on the same segment and peers out on the internet are fine. If you
 want your laptop to talk to the tower directly, that is a firewall rule between
 those VLANs (allow UDP), not an application change.
 
+## Storage: use the array, not the cache
+
+A bay grows to the size of the weights it mirrors, so it does not belong on
+`appdata`. Unraid ships `appdata` as `shareUseCache="only"`, which pins it to
+the cache pool — here that is a 3.7 TB SSD, against 28 TB free on the array.
+
+So Hyperbay gets its own share with the cache turned off, exactly like `Media`:
+
+```sh
+# /boot/config/shares/hyperbay.cfg
+shareUseCache="no"     # array only, never the cache pool
+shareCachePool=""
+shareAllocator="highwater"
+```
+
+```sh
+mkdir -p /mnt/user/hyperbay && chown 99:100 /mnt/user/hyperbay
+```
+
+Confirm it really landed on the array rather than trusting the setting:
+
+```sh
+dd if=/dev/urandom of=/mnt/user/hyperbay/.t bs=1M count=8 && sync
+ls /mnt/cache/hyperbay        # must not exist
+ls -d /mnt/disk*/hyperbay     # this is where it should be
+rm /mnt/user/hyperbay/.t
+```
+
+### Moving an existing bay between filesystems
+
+A corestore cannot simply be copied. `cores/CORESTORE` is a device file that
+records its own inode, and on start the store checks it:
+
+```
+error: Invalid device file, was modified
+```
+
+That guard exists so two copies of the same store cannot be run at once — which
+would be two peers with one identity. To migrate deliberately: stop the
+container, copy the directory, **delete `cores/CORESTORE`** so it regenerates,
+start, and then *delete the old copy* rather than leaving it around.
+
+```sh
+docker stop hyperbay
+cp -a /mnt/user/appdata/hyperbay/. /mnt/user/hyperbay/
+rm -f /mnt/user/hyperbay/cores/CORESTORE
+chown -R 99:100 /mnt/user/hyperbay
+# rebind the container to /mnt/user/hyperbay, verify the identity and catalog
+# key are unchanged, then:
+rm -rf /mnt/user/appdata/hyperbay
+```
+
+The identity lives in `identity.json` and the bay in `cores/db`, so both
+survive the move; only the inode guard needs resetting.
+
 ## Configuration
 
 | Variable | Default | Meaning |
@@ -121,7 +176,7 @@ curl -s http://TOWER_IP:8433/api/catalog        # the key to share
 curl -O http://TOWER_IP:8433/f/<owner>/<name>/<file>
 ```
 
-Back up `/mnt/user/appdata/hyperbay`. It holds this peer's ed25519 identity —
+Back up `/mnt/user/hyperbay`. It holds this peer's ed25519 identity —
 lose it and the node cannot update anything it published, because a publisher
 can only rewrite records it signed.
 

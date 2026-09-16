@@ -1,0 +1,218 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  test:
+    name: test (bare)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Node is only here to drive npm. The suite itself runs on Bare.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # bare-runtime is deliberately not a project dependency — locally `bare`
+      # is a global install — so CI installs it the same way the image does.
+      - name: Install Bare
+        run: npm i --no-save --no-audit --no-fund bare-runtime@1.33.3
+
+      - name: Run the suite
+        run: ./node_modules/bare-runtime/bin/bare test/all.js
+
+  image:
+    name: image (${{ matrix.platform }})
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            suffix: amd64
+          - platform: linux/arm64
+            suffix: arm64
+    steps:
+      - uses: actions/checkout@v5
+
+      # arm64 is emulated on the amd64 runners.
+      - uses: docker/setup-qemu-action@v3
+        if: matrix.platform == 'linux/arm64'
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Pull requests build but do not publish: a fork must not be able to push
+      # to the registry.
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The native addons (rocksdb-native, sodium-native, udx-native) resolve
+      # prebuilds for the platform npm installs on, so each arch is a real
+      # build rather than a manifest relabel.
+      - name: Build${{ github.event_name != 'pull_request' && ' and push by digest' || '' }}
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          cache-from: type=gha,scope=${{ matrix.suffix }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.suffix }}
+          provenance: false
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: hyperbay:ci-${{ matrix.suffix }}
+          outputs: ${{ github.event_name != 'pull_request' && format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE) || '' }}
+
+      # An image that boots is the only claim worth making. amd64 runs natively;
+      # the arm64 image is only built, since running it under QEMU proves little
+      # about a real arm64 host.
+      - name: Smoke test the image
+        if: matrix.platform == 'linux/amd64'
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            image=hyperbay:ci-amd64
+          else
+            image="${IMAGE}@${{ steps.build.outputs.digest }}"
+            docker pull "$image"
+          fi
+
+          docker run -d --name hb -p 8433:8433 -v hb-data:/data "$image"
+
+          # The node has to open its corestore and bind the gateway; a fresh
+          # store plus DHT bootstrap takes a few seconds.
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 3 http://127.0.0.1:8433/api/state >/dev/null 2>&1; then break; fi
+            if [ "$i" = "30" ]; then echo "gateway never came up"; docker logs hb; exit 1; fi
+            sleep 2
+          done
+
+          state=$(curl -fsS http://127.0.0.1:8433/api/state)
+          echo "$state"
+          echo "$state" | grep -q '"catalogKey":"[a-z0-9]\{52\}"' || { echo "no catalog key: the autobase did not open"; docker logs hb; exit 1; }
+
+          # The UI has to be served, not just the API — the gateway resolves it
+          # from disk and that has broken before.
+          curl -fsS http://127.0.0.1:8433/ | grep -q 'id="view"' || { echo "UI not served"; exit 1; }
+
+          # And it has to actually move bytes: publish a folder through the
+          # gateway, then read a file back out of the hyperdrive over HTTP.
+          docker exec hb sh -c 'mkdir -p /data/smoke && printf "{\"hidden_size\":8}" > /data/smoke/config.json && head -c 1048576 /dev/urandom > /data/smoke/model.safetensors'
+          expected=$(docker exec hb sh -c 'sha256sum /data/smoke/model.safetensors | cut -d" " -f1')
+
+          curl -fsS -X POST -H 'content-type: application/json' \
+            -d '{"dir":"/data/smoke","meta":{"owner":"ci","name":"smoke","license":"mit"}}' \
+            http://127.0.0.1:8433/api/publish
+
+          for i in $(seq 1 30); do
+            status=$(curl -fsS http://127.0.0.1:8433/api/jobs/1 | grep -o '"status":"[a-z]*"' | cut -d'"' -f4)
+            [ "$status" = "done" ] && break
+            [ "$status" = "error" ] && { curl -fsS http://127.0.0.1:8433/api/jobs/1; exit 1; }
+            [ "$i" = "30" ] && { echo "publish never finished"; docker logs hb; exit 1; }
+            sleep 2
+          done
+
+          curl -fsS -o /tmp/out.bin http://127.0.0.1:8433/f/ci/smoke/model.safetensors
+          actual=$(sha256sum /tmp/out.bin | cut -d' ' -f1)
+          [ "$actual" = "$expected" ] || { echo "served bytes differ: $actual != $expected"; exit 1; }
+          echo "published and served 1 MiB byte-identical out of the hyperdrive"
+
+          # Range support is what lets a broken download resume.
+          code=$(curl -s -o /tmp/part.bin -w '%{http_code}' -r 0-1023 http://127.0.0.1:8433/f/ci/smoke/model.safetensors)
+          [ "$code" = "206" ] || { echo "expected 206, got $code"; exit 1; }
+          [ "$(stat -c%s /tmp/part.bin)" = "1024" ] || { echo "range returned the wrong length"; exit 1; }
+          echo "range requests work"
+
+          docker rm -f hb >/dev/null
+
+      # A colon is not allowed in an artifact file name, so store the bare hex
+      # and put the algorithm back when the manifest list is assembled.
+      - name: Export the digest
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${{ matrix.suffix }}-${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: digest-${{ matrix.suffix }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  publish:
+    name: publish manifest
+    needs: image
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Both arches were pushed by digest; this is the one manifest list that
+      # gives them human tags.
+      - name: Tag the manifest list
+        env:
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "$RELEASE_TAG" ]; then
+            tags="-t ${IMAGE}:${RELEASE_TAG#v} -t ${IMAGE}:latest"
+          else
+            tags="-t ${IMAGE}:main -t ${IMAGE}:${GITHUB_SHA::7} -t ${IMAGE}:latest"
+          fi
+
+          # Artifact file names are "<arch>-<hex>".
+          refs=""
+          for f in /tmp/digests/*; do
+            refs="$refs ${IMAGE}@sha256:$(basename "$f" | cut -d- -f2-)"
+          done
+
+          echo "tagging with:$tags"
+          echo "from digests:$refs"
+          docker buildx imagetools create $tags $refs
+
+      - name: Show what landed
+        run: docker buildx imagetools inspect ${{ env.IMAGE }}:latest

@@ -44,7 +44,7 @@
   <!--
     The image runs as uid 10001. Unraid keeps appdata as nobody:users, so run
     as 99:100 and make the directory writable by it before first start:
-      mkdir -p /mnt/user/appdata/hyperbay && chown -R 99:100 /mnt/user/appdata/hyperbay
+      mkdir -p /mnt/user/hyperbay && chown -R 99:100 /mnt/user/hyperbay
     Without this the node cannot write /data/identity.json and exits.
   -->
   <ExtraParams>--user 99:100</ExtraParams>
@@ -58,13 +58,13 @@
   <Config
     Name="Storage"
     Target="/data"
-    Default="/mnt/user/appdata/hyperbay"
+    Default="/mnt/user/hyperbay"
     Mode="rw"
-    Description="Corestore, identity keypair and config. Back this up: it is this peer's identity."
+    Description="Corestore, identity keypair and config. Use a share with the cache turned off (shareUseCache=&quot;no&quot;) so the bay grows onto the array — appdata is cache-only and would fill the SSD. Back this up: it is this peer's identity."
     Type="Path"
     Display="always"
     Required="true"
-    Mask="false">/mnt/user/appdata/hyperbay</Config>
+    Mask="false">/mnt/user/hyperbay</Config>
 
   <Config
     Name="Gateway port"

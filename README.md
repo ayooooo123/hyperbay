@@ -90,7 +90,7 @@ docker buildx build --platform linux/amd64 -t hyperbay:local .
 
 docker run -d --name hyperbay --restart unless-stopped --network host \
   -e HYPERBAY_HOST=0.0.0.0 \
-  -v /mnt/user/appdata/hyperbay:/data \
+  -v /mnt/user/hyperbay:/data \
   hyperbay:local
 ```
 

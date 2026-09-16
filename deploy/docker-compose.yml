@@ -14,7 +14,7 @@ services:
     # Unraid keeps appdata as nobody:users. The image's own user is 10001, so
     # without this the node cannot write /data/identity.json. Whatever uid you
     # pick, the host directory has to be writable by it:
-    #   chown -R 99:100 /mnt/user/appdata/hyperbay
+    #   chown -R 99:100 /mnt/user/hyperbay
     user: "99:100"
     environment:
       # The gateway. 0.0.0.0 so it is reachable from the LAN; put it behind a
@@ -29,7 +29,11 @@ services:
     volumes:
       # Corestore, the ed25519 identity and config.json all live here. Losing
       # this volume means losing this peer's identity and everything it seeds.
-      - /mnt/user/appdata/hyperbay:/data
+      #
+      # A dedicated share with shareUseCache="no" — the array, not the cache
+      # pool. Do NOT put this on appdata: that share is cache-only, so a
+      # growing bay fills the SSD instead of using the array.
+      - /mnt/user/hyperbay:/data
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8433/api/state').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
       interval: 30s
