@@ -1085,6 +1085,11 @@ function publishScreen (root, route) {
 // ---------------------------------------------------------------------------
 // Screen: Network (#/network). Keys, peers, and what is decentralized.
 
+// A successful join changes the node state, which remounts this screen — so the
+// last join message lives at module scope or it would be wiped by its own
+// success and the action would look like it did nothing.
+let joinStatus = ''
+
 function networkScreen (root) {
   const wrap = el('section.network')
   root.append(wrap)
@@ -1125,7 +1130,8 @@ function networkScreen (root) {
   const kv = (k, v) => el('div.kv-row', el('dt', k), el('dd', v))
 
   // Switching bays is a real network action, so it reports what happened
-  // rather than silently succeeding.
+  // rather than silently succeeding. The message itself lives at module scope
+  // (see joinStatus above) because a successful join remounts this screen.
   function joinForm () {
     const input = el('input.mono', {
       type: 'text',
@@ -1135,30 +1141,33 @@ function networkScreen (root) {
       'aria-label': 'Catalog key to join'
     })
     const button = el('button.btn.btn-accent', { type: 'button' }, ico('key'), 'Join')
-    const status = el('p.muted.small')
+    const status = el('p.muted.small', { text: joinStatus })
+
+    const say = message => {
+      joinStatus = message
+      status.textContent = message
+    }
 
     const submit = async () => {
       const key = input.value.trim()
-      if (!key) {
-        status.textContent = 'Paste a catalog key first.'
-        return
-      }
+      if (!key) return say('Paste a catalog key first.')
+
       button.disabled = true
       input.disabled = true
-      status.textContent = 'Joining…'
+      say('Joining…')
       try {
         const result = await store.get().api.joinCatalog(key)
         input.value = ''
         if (result && result.changed === false) {
-          status.textContent = 'Already on that bay.'
+          say('Already on that bay.')
         } else {
-          status.textContent = 'Joined. Reading the index from peers…'
+          say('Joined. Reading the index from peers…')
           toast('Joined a new bay', 'ok')
           const s = await store.get().api.state()
           store.set({ node: s || {} })
         }
       } catch (err) {
-        status.textContent = err && err.message ? err.message : 'Could not join that bay.'
+        say(err && err.message ? err.message : 'Could not join that bay.')
         toast('Join failed', 'error')
       } finally {
         button.disabled = false

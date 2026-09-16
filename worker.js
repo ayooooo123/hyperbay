@@ -23,6 +23,20 @@ function send (frame) {
   pipe.write(JSON.stringify(frame) + '\n')
 }
 
+
+// Pear hands the app location out as a file: link (dev) or a pear: link
+// (staged). Only a file link maps to something bare-fs can read; for a staged
+// app the gateway simply serves no UI, which is fine because the window loads
+// its own assets from Pear.
+function pearAppRoot () {
+  const link = Pear.config && (Pear.config.applink || Pear.config.dir)
+  if (!link) return null
+  const value = String(link)
+  if (value.startsWith('file://')) return decodeURIComponent(value.slice('file://'.length))
+  if (value.startsWith('/')) return value
+  return null
+}
+
 function serialisable (value) {
   return value === undefined ? null : value
 }
@@ -32,8 +46,15 @@ async function main () {
   // desktop app keeps its bay in the per-app sandbox.
   const node = new HyperbayNode({ seed: true })
   await node.ready()
-
-  const gateway = await createGateway(node, { port: 0, host: '127.0.0.1' })
+  // Under Pear, `__dirname` is bundler-relative and bare-fs cannot read it, so
+  // the UI root has to come from Pear's own handle on the app directory.
+  // Without this the gateway 404s every static file inside the desktop app.
+  const appRoot = pearAppRoot()
+  const gateway = await createGateway(node, {
+    port: 0,
+    host: '127.0.0.1',
+    uiRoot: appRoot ? appRoot + '/ui' : undefined
+  })
   const api = createApi({ transport: 'direct', node })
   const state = await node.state()
 
@@ -89,7 +110,8 @@ async function main () {
     port: gateway.port,
     catalogKey: state.catalogKey,
     identity: state.identity,
-    storage: state.storage
+    storage: state.storage,
+    appRoot
   })
 }
 
