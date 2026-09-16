@@ -1,5 +1,7 @@
 # Hyperbay
 
+[![ci](https://github.com/ayooooo123/hyperbay/actions/workflows/ci.yml/badge.svg)](https://github.com/ayooooo123/hyperbay/actions/workflows/ci.yml)
+
 A bay for open model weights that nobody owns.
 
 Sites that mirror open model weights are still one host, one index, one domain.
@@ -86,17 +88,24 @@ broken transfer resumes instead of restarting.
 ## Run it as a seedbox
 
 ```sh
-docker buildx build --platform linux/amd64 -t hyperbay:local .
-
 docker run -d --name hyperbay --restart unless-stopped --network host \
+  --user 99:100 \
   -e HYPERBAY_HOST=0.0.0.0 \
   -v /mnt/user/hyperbay:/data \
-  hyperbay:local
+  ghcr.io/ayooooo123/hyperbay:latest
 ```
+
+CI builds and publishes `linux/amd64` and `linux/arm64` on every push to
+`main`, so there is nothing to build by hand. Updating is
+`docker pull … && docker restart hyperbay`; the data volume is untouched, so the
+peer keeps its identity and its bay.
 
 Configuration is by flag or environment (`HYPERBAY_STORAGE`, `HYPERBAY_PORT`,
 `HYPERBAY_HOST`, `HYPERBAY_CATALOG`); flags win. Host networking is the default
 because Hyperswarm holepunches over UDP and nothing needs forwarding.
+
+Put the data on storage that can grow — a bay is as large as the weights it
+mirrors. On Unraid that means a share with the cache turned off, not `appdata`.
 
 `deploy/` has a compose file, an Unraid template and the full notes —
 `deploy/README.md`.

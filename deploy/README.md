@@ -22,24 +22,26 @@ Two things the image needs that are easy to miss:
   entrypoint calls `node_modules/bare-runtime/bin/bare` directly. `npm i
   --no-save` does not create the `node_modules/.bin` shim.
 
-## Deploy — registry
+## Deploy — registry (the normal path)
 
-Push the image, then use either the compose file or the Unraid template:
+CI publishes the image, so there is nothing to build by hand. Every push to
+`main` runs the suite, builds `linux/amd64` and `linux/arm64`, smoke tests the
+amd64 image, and assembles a manifest list:
 
-```sh
-docker buildx build --platform linux/amd64,linux/arm64 \
-  -t ghcr.io/ayooooo123/hyperbay:latest --push .
+```
+ghcr.io/ayooooo123/hyperbay:latest
+ghcr.io/ayooooo123/hyperbay:main
+ghcr.io/ayooooo123/hyperbay:<short sha>
+ghcr.io/ayooooo123/hyperbay:<version>   # on a v* tag
 ```
 
-Pushing to GHCR needs a token with `write:packages` (the default `gh` token does
-not have it):
+The workflow uses its own `GITHUB_TOKEN`, which carries `packages: write` — so
+publishing needs no personal access token. (A local `docker push` to GHCR does:
+the default `gh` token has no `write:packages`, and `gh auth refresh -h
+github.com -s write:packages` is the only way to add it.) The package is public
+because the repo is, so the tower pulls it without logging in.
 
-```sh
-gh auth refresh -h github.com -s write:packages
-gh auth token | docker login ghcr.io -u <user> --password-stdin
-```
-
-Then on Unraid, either:
+On Unraid, either:
 
 ```sh
 # Compose Manager plugin, or plain docker compose over ssh
@@ -49,6 +51,15 @@ docker compose -f deploy/docker-compose.yml up -d
 or copy `deploy/unraid-hyperbay.xml` to
 `/boot/config/plugins/dockerMan/templates-user/my-hyperbay.xml` and add the
 container from the Docker tab.
+
+Updating is then just:
+
+```sh
+ssh unraid 'docker pull ghcr.io/ayooooo123/hyperbay:latest && docker restart hyperbay'
+```
+
+The data volume is untouched by an image change, so the peer keeps its identity
+and its bay across upgrades.
 
 ## Deploy — no registry
 
