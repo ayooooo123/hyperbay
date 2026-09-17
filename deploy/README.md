@@ -90,27 +90,63 @@ needs port forwarding — the swarm dials out.
 Only the gateway port (8433) is inbound, and only if you want the UI or the
 bridge from another machine.
 
-### Peers across VLANs
+### When a peer will not connect: check the egress path, not the firewall
 
-Outbound UDP is all the swarm needs to reach the wider network, and the
-deployed node bootstraps the DHT fine (it learns its public address and fills a
-routing table).
+Outbound UDP is all the swarm needs to reach the wider network, and the deployed
+node bootstraps the DHT fine — it learns its public address and fills a routing
+table.
 
-Two peers on *different local VLANs* are a separate matter. On this network the
-tower sits on `10.0.40.0/24` and a laptop on `10.0.10.0/24`; TCP between them
-is routed (ssh works) but a Hyperswarm connection never forms in either
-direction, and a bare two-peer probe on a shared topic also gets zero
-connections. Both peers report `firewalled: true`, so they need UDP
-holepunching, and inter-VLAN UDP is filtered here — with both behind one public
-address, the router would also have to hairpin.
+Two peers on the same segment connect immediately: a second container on the
+tower joined the deployed bay, replicated the index and pulled a 5 MB artifact
+byte-identical in under a second.
 
-Two peers on the same side of that boundary connect immediately: a second
-container on the tower joined the deployed bay, replicated the index and pulled
-a 5 MB artifact byte-identical in under a second.
+A peer on another local subnet is where it gets interesting, and the obvious
+diagnosis is usually wrong. On this network the tower sits on `10.0.40.0/24` and
+a laptop on `10.0.10.0/24`. No Hyperswarm connection ever forms. It is tempting
+to blame inter-VLAN filtering; measured, that was not it:
 
-So: peers on the same segment and peers out on the internet are fine. If you
-want your laptop to talk to the tower directly, that is a firewall rule between
-those VLANs (allow UDP), not an application change.
+- The router already passed everything needed in that direction.
+- `tcpdump` on both VLAN interfaces, filtered to the two hosts, caught **zero**
+  packets out of ~1.9M during live joins. Nothing was being dropped because
+  nothing was being sent.
+- A DHT lookup of the bay's topic from the laptop returned the tower with relay
+  addresses, so discovery was working the whole time.
+
+The actual cause was the **egress path**. The tower left via WAN
+(`107.194.4.98`); the laptop left via a commercial VPN (`178.249.211.77`).
+`hyperdht` only attempts its LAN shortcut when both peers appear behind the
+*same* public address (`lib/connect.js`, the `clientAddress.host ===
+serverAddress.host` guard), so with two different public addresses it never
+tries the local path at all — and a holepunch between a commercial VPN exit and
+a home WAN, both ends `firewalled: true`, is the case least likely to work:
+that NAT is typically symmetric and drops unsolicited inbound UDP.
+
+So before writing firewall rules, check:
+
+```sh
+curl -s https://api.ipify.org          # on each peer
+```
+
+If those differ because one peer is on a VPN, no firewall rule will help. Either
+give both peers the same egress, or accept that they will not be direct peers.
+
+**Not being a peer is not the same as losing access.** The HTTP bridge works
+across subnets over plain TCP, so a machine that cannot join the swarm can
+still:
+
+- browse the catalog and search it — `GET /api/artifacts`
+- download any file, with `Range` so transfers resume — `GET /f/<slug>/<path>`
+- **add content to the bay** by having a real peer do the mirroring for it —
+  `POST /api/import {"repo":"owner/name"}` fetches from Hugging Face on the
+  *node*, so the caller needs no local copy and no swarm connectivity. Verified
+  from a VPN'd laptop: it drove the tower into mirroring a 9-file, 12.5 MB repo
+  which the tower then seeds.
+- join a different bay — `POST /api/catalog {"key":"…"}`
+
+The one thing it cannot do is seed, and note that `POST /api/publish` takes a
+directory path **on the node**, not on the caller — so publishing your own local
+folder does need to run on a machine that is a peer (or the files have to reach
+the node first).
 
 ## Storage: use the array, not the cache
 
